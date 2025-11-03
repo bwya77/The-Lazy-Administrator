@@ -17,7 +17,9 @@ function New-ProofpointUser {
         [Parameter(Mandatory)]
         [string]$Email,
         [ValidateSet("end_user", "channel_admin")]
-        [string]$Type = "channel_admin"
+        [string]$Type = "channel_admin",
+        [ValidateSet("US1", "US2", "US3", "US4", "US5", "EU1")]
+        [string[]]$Region = @("US1")
     )
     begin {
         $Headers = @{
@@ -25,7 +27,6 @@ function New-ProofpointUser {
             "X-Password"   = $ProofPointPassword
             "Content-Type" = "application/json"
         }
-        $Uri = "https://us1.proofpointessentials.com/api/v1/orgs/$OrgDomain/users"
     }
     process {
         $Body = @{
@@ -36,16 +37,23 @@ function New-ProofpointUser {
         } | ConvertTo-Json
 
         Try {
-            $Response = Invoke-RestMethod -Uri $Uri -Method Post -Headers $Headers -Body $Body
+            $items = $Region
+            foreach ($item in $items) {
+                Write-Host "Creating user $Email in Proofpoint region $item"
+                $Response = Invoke-RestMethod -Uri "https://$item.proofpointessentials.com/api/v1/orgs/$OrgDomain/users" -Method Post -Headers $Headers -Body $Body -ErrorAction Stop
+            }
         }
         Catch {
-            Write-Error "Failed to create user: $_"
+            $errorMessage = "Failed to create user $Email in Proofpoint: $_"
+            Write-Error $errorMessage
+            throw $errorMessage
         }
     }
     end {
         return $Response
     }
 }
+
 function Get-ProofpointUsers {
     param (
         [Parameter(Mandatory)]
@@ -53,7 +61,9 @@ function Get-ProofpointUsers {
         [Parameter(Mandatory)]
         [string]$ProofPointUser,
         [Parameter(Mandatory)]
-        [string]$ProofPointPassword
+        [string]$ProofPointPassword,
+        [ValidateSet("US1", "US2", "US3", "US4", "US5", "EU1")]
+        [string[]]$Region = @("US1")
     )
     begin {
         $Headers = @{
@@ -61,20 +71,28 @@ function Get-ProofpointUsers {
             "X-Password"   = $ProofPointPassword
             "Content-Type" = "application/json"
         }
-        $Uri = "https://us1.proofpointessentials.com/api/v1/orgs/$OrgDomain/users"
+        
     }
     process {
         Try {
-            $Response = Invoke-RestMethod -Uri $Uri -Method Get -Headers $Headers
+            $items = $Region
+            foreach ($item in $items) {
+                Write-Host "Retrieving users from Proofpoint region $item"
+                $Uri = "https://$item.proofpointessentials.com/api/v1/orgs/$OrgDomain/users"
+                $Response = Invoke-RestMethod -Uri $Uri -Method Get -Headers $Headers -ErrorAction Stop
+            }
         }
         Catch {
-            Write-Error "Failed to retrieve users: $_"
+            $errorMessage = "Failed to retrieve users from Proofpoint: $_"
+            Write-Error $errorMessage
+            throw $errorMessage
         }
     }
     end {
         return $Response.users
     }
 }
+
 function Remove-ProofpointUser {
     param (
         [Parameter(Mandatory)]
@@ -84,7 +102,9 @@ function Remove-ProofpointUser {
         [Parameter(Mandatory)]
         [string]$ProofPointPassword,
         [Parameter(Mandatory)]
-        [string]$UserEmail
+        [string]$UserEmail,
+        [ValidateSet("US1", "US2", "US3", "US4", "US5", "EU1")]
+        [string[]]$Region = @("US1")
     )
     begin {
         $Headers = @{
@@ -92,14 +112,20 @@ function Remove-ProofpointUser {
             "X-Password"   = $ProofPointPassword
             "Content-Type" = "application/json"
         }
-        $Uri = "https://us1.proofpointessentials.com/api/v1/orgs/$OrgDomain/users/$UserEmail"
     }
     process {
         Try {
-            $Response = Invoke-RestMethod -Uri $Uri -Method Delete -Headers $Headers
+            $items = $Region
+            foreach ($item in $items) {
+                Write-Host "Deleting user $UserEmail from Proofpoint region $item"
+                $Uri = "https://$item.proofpointessentials.com/api/v1/orgs/$OrgDomain/users/$UserEmail"
+                $Response = Invoke-RestMethod -Uri $Uri -Method Delete -Headers $Headers -ErrorAction Stop
+            }
         }
         Catch {
-            Write-Error "Failed to delete user: $_"
+            $errorMessage = "Failed to delete user $UserEmail from Proofpoint: $_"
+            Write-Error $errorMessage
+            throw $errorMessage
         }
     }
     end {
@@ -108,12 +134,14 @@ function Remove-ProofpointUser {
     }
 }
 
-$clientID = $env:clientID
-$clientSecret = $env:clientSecret
-$tenantID = $env:tenantID
+$clientID = $env:EntraIDProofpointUserProvisionclientID
+$clientSecret = $env:EntraIDProofpointUserProvisionclientSecret
+$tenantID = $env:EntraIDtenantID
 $proofPointOrgDomain = $env:proofPointOrgDomain
 $proofPointUser = $env:proofPointUser
 $proofPointPassword = $env:proofPointPassword
+$expectedClientState = $env:clientState
+$ProofpointRegions = @("US1","US2", "US3", "US4")
 
 # Handle validation request
 if ($Request.Query.validationToken) {
@@ -123,15 +151,12 @@ if ($Request.Query.validationToken) {
             ContentType = "text/plain"
             Body        = $validationToken
         })
-    return  # Exit immediately after validation
+    return
 }
 
 # Handle change notifications
 if ($Request.Body) {
     try {
-        # Get the expected clientState from environment variable
-        $expectedClientState = $env:clientState
-        
         # Get the single notification from the value array
         $notification = $Request.Body.value[0]
         
@@ -142,13 +167,12 @@ if ($Request.Body) {
                     StatusCode = [HttpStatusCode]::Unauthorized
                     Body       = "Invalid client state"
                 })
-            return  # Exit without processing
+            return
         }
         
         # Extract the group ID
         $groupId = $notification.resourceData.id
-        # Get current Proofpoint users
-        $proofpointUsers = Get-ProofpointUsers -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword
+        
         # Get the members delta array
         $membersDelta = $notification.resourceData.'members@delta'
         
@@ -164,25 +188,24 @@ if ($Request.Body) {
                     scope         = "https://graph.microsoft.com/.default"
                     client_secret = $clientSecret
                     grant_type    = "client_credentials"
-                }
+                } -ErrorAction Stop
                 $graphToken = $graphTokenResponse.access_token
             }
             catch {
-                Write-Error "Failed to obtain Graph token: $_"
+                $errorMessage = "Failed to obtain Graph token: $_"
+                Write-Error $errorMessage
                 Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
-                    StatusCode = [HttpStatusCode]::InternalServerError
-                    Body       = "Failed to obtain Graph token"
-                })
+                        StatusCode = [HttpStatusCode]::InternalServerError
+                        Body       = $errorMessage
+                    })
                 return
             }
             
             foreach ($member in $membersDelta) {
                 if ($member.'@removed') {
-                    # User was removed from the group
                     $removedUsers += $member.id
                 }
                 else {
-                    # User was added to the group
                     $addedUsers += $member.id
                 }
             }
@@ -193,25 +216,31 @@ if ($Request.Body) {
                 foreach ($userId in $removedUsers) {
                     Write-Host "User removed: $userId"
                     
-                    # Lookup user details in Microsoft Graph
-                    Write-Host "Looking up user details in Microsoft Graph for ID: $userId"
-                    $userDetails = Invoke-RestMethod -Method Get -Uri "https://graph.microsoft.com/v1.0/users/$userId" -Headers @{
-                        Authorization = "Bearer $graphToken"
+                    try {
+                        # Lookup user details in Microsoft Graph
+                        Write-Host "Looking up user details in Microsoft Graph for ID: $userId"
+                        $userDetails = Invoke-RestMethod -Method Get -Uri "https://graph.microsoft.com/v1.0/users/$userId" -Headers @{
+                            Authorization = "Bearer $graphToken"
+                        } -ErrorAction Stop
+                        
+                        Write-Host "User displayname: $($userDetails.displayName) with UserPrincipalName: $($userDetails.userPrincipalName)"
+                        $RemoveUser = $userDetails.userPrincipalName
+                        $ProofpointRegions | ForEach-Object {
+                            Write-Host "Current Proofpoint Regions: $_"
+                            # Get current Proofpoint users (will throw if fails)
+                            $proofpointUser = Get-ProofpointUsers -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -Region $_ | Where-Object { $_.primary_email -eq $RemoveUser }
+                            if ($proofpointUser) {  
+                                Write-Host "Removing user $RemoveUser in Proofpoint."
+                                Remove-ProofpointUser -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -UserEmail $RemoveUser -Region $_
+                            }
+                            else {
+                                Write-Host "User $($userDetails.userPrincipalName) not found in Proofpoint."
+                            }
+                        }
                     }
-                    if (!$userDetails) {
-                        Write-Warning "Failed to retrieve details for user ID: $userId"
-                        continue
-                    }
-                    Write-Host "User displayname: $($userDetails.displayName) with UserPrincipalName: $($userDetails.userPrincipalName)"
-                    #Check if user exists in Proofpoint and remove
-                    $RemoveUser = $userDetails.userPrincipalName
-                    $proofpointUser = $proofpointUsers | Where-Object { $_.primary_email -eq $RemoveUser }
-                    if ($proofpointUser) {  
-                        Write-Host "Removing user $RemoveUser in Proofpoint."
-                        Remove-ProofpointUser -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -UserEmail $RemoveUser #$proofpointUser.primary_email
-                    }
-                    else {
-                        Write-Host "User $($userDetails.userPrincipalName) not found in Proofpoint."
+                    catch {
+                        # Log the error but don't fail the entire operation for one user
+                        Write-Warning "Failed to process removed user $userId : $_"
                     }
                 }
             }
@@ -222,31 +251,37 @@ if ($Request.Body) {
                 foreach ($userId in $addedUsers) {
                     Write-Host "User added: $userId"
                     
-                    # Lookup user details in Microsoft Graph
-                    Write-Host "Looking up user details in Microsoft Graph for ID: $userId"
-                    $userDetails = Invoke-RestMethod -Method Get -Uri "https://graph.microsoft.com/v1.0/users/$userId" -Headers @{
-                        Authorization = "Bearer $graphToken"
+                    try {
+                        # Lookup user details in Microsoft Graph
+                        Write-Host "Looking up user details in Microsoft Graph for ID: $userId"
+                        $userDetails = Invoke-RestMethod -Method Get -Uri "https://graph.microsoft.com/v1.0/users/$userId" -Headers @{
+                            Authorization = "Bearer $graphToken"
+                        } -ErrorAction Stop
+                        
+                        Write-Host "User displayname: $($userDetails.displayName) with UserPrincipalName: $($userDetails.userPrincipalName)"
+                        $AddUser = $userDetails.userPrincipalName
+                        $ProofpointRegions | ForEach-Object {
+                            Write-Host "Current Proofpoint Regions: $_"
+                            # Get current Proofpoint users (will throw if fails)
+                            $proofpointUser = Get-ProofpointUsers -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -Region $_ | Where-Object { $_.primary_email -eq $AddUser }
+                            if (-not $proofpointUser) {  
+                                Write-Host "Creating user $AddUser in Proofpoint."
+                                New-ProofpointUser -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -FirstName $userDetails.givenName -LastName $userDetails.surname -Email $AddUser -Region $_
+                            }
+                            else {
+                                Write-Host "User $($userDetails.userPrincipalName) already exists in Proofpoint."
+                            }
+                        }
                     }
-                    if (!$userDetails) {
-                        Write-Warning "Failed to retrieve details for user ID: $userId"
-                        continue
-                    }
-                    Write-Host "User displayname: $($userDetails.displayName) with UserPrincipalName: $($userDetails.userPrincipalName)"
-                    # Check if user already exists in Proofpoint and add if not 
-                    $proofpointUser = $proofpointUsers | Where-Object { $_.primary_email -eq $userDetails.userPrincipalName }
-                    if (-not $proofpointUser) {  
-                        $NewUser = $userDetails.userPrincipalName
-                        Write-Host "Creating user $NewUser in Proofpoint."
-                        New-ProofpointUser -OrgDomain $proofPointOrgDomain -ProofPointUser $env:proofPointUser -ProofPointPassword $env:proofPointPassword -FirstName $userDetails.givenName -LastName $userDetails.surname -Email $NewUser
-                    }
-                    else {
-                        Write-Host "User $($userDetails.userPrincipalName) already exists in Proofpoint."
+                    catch {
+                        # Log the error but don't fail the entire operation for one user
+                        Write-Warning "Failed to process added user $userId : $_"
                     }
                 }
             }
         }
         
-        # Return success response
+        # Return success response - only reached if no critical errors occurred
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::OK
                 Body       = "Notification processed successfully"
@@ -256,7 +291,7 @@ if ($Request.Body) {
         Write-Error "Error processing notification: $_"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::InternalServerError
-                Body       = "Error processing notification"
+                Body       = "Error processing notification: $_"
             })
     }
 }
