@@ -89,6 +89,7 @@ try {
 
     $contact = $response.data.project.issue.customerRelationsContacts.nodes
     $email = $contact.email
+    $firstname = $contact.firstname
 }
 catch {
     return @{
@@ -104,6 +105,7 @@ $payload = [PSCustomObject]@{
     OldStatus    = $oldStatus
     NewStatus    = $newStatus
     ContactEmail = $email
+    FirstName    = $firstname
     IssueIid     = $issueIid
     ProjectPath  = $projectPath
 }
@@ -118,6 +120,7 @@ try {
         OldStatus      = $oldStatus
         NewStatus      = $newStatus
         ContactEmail   = $email
+        FirstName      = $firstname
         LogicAppStatus = $logicAppStatus
     }
 
@@ -132,6 +135,7 @@ catch {
         OldStatus      = $oldStatus
         NewStatus      = $newStatus
         ContactEmail   = $email
+        FirstName      = $firstname
         LogicAppStatus = $logicAppStatus
     }
 
