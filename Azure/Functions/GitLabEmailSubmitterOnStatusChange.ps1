@@ -65,6 +65,7 @@ if ($oldStatus -eq $newStatus) {
 # ----------------------------
 $projectPath = $body.project.path_with_namespace
 $issueIid = $body.object_attributes.iid
+$title = $body.object_attributes.title
 
 $query = @"
 {
@@ -107,6 +108,7 @@ $payload = [PSCustomObject]@{
     ContactEmail = $email
     FirstName    = $firstname
     IssueIid     = $issueIid
+    IssueTitle   = $title
     ProjectPath  = $projectPath
 }
 
