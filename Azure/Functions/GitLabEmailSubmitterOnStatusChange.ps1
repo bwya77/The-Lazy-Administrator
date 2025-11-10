@@ -7,6 +7,7 @@ param($Request, $TriggerMetadata)
 # ----------------------------
 [string]$gitlabAccessToken = $env:GitlabPAT
 [string]$gitlabApiUrl = "https://gitlab.com/api/graphql"
+[string]$logicAppEndpoint = $env:logicAppEndpoint
 
 # ----------------------------
 # HELPER FUNCTIONS
@@ -32,10 +33,11 @@ function Get-StatusLabel {
 # ----------------------------
 try {
     $body = $Request.Body | Get-Content -Raw | ConvertFrom-Json
-} catch {
+}
+catch {
     return @{
         status = 400
-        body = "Invalid JSON payload"
+        body   = "Invalid JSON payload"
     }
 }
 
@@ -43,7 +45,7 @@ try {
 if (-not $body.changes.labels) {
     return @{
         status = 200
-        body = "No label changes, nothing to process."
+        body   = "No label changes, nothing to process."
     }
 }
 
@@ -54,7 +56,7 @@ $newStatus = Get-StatusLabel -labels $body.changes.labels.current
 if ($oldStatus -eq $newStatus) {
     return @{
         status = 200
-        body = "Status unchanged."
+        body   = "Status unchanged."
     }
 }
 
@@ -85,25 +87,57 @@ try {
         "Authorization" = "Bearer $gitlabAccessToken" 
     } -Body (@{ query = $query } | ConvertTo-Json)
 
-    $contacts = $response.data.project.issue.customerRelationsContacts.nodes
-    $emails = $contacts | ForEach-Object { $_.email } | Where-Object { $_ } # skip nulls
-} catch {
+    $contact = $response.data.project.issue.customerRelationsContacts.nodes
+    $email = $contact.email
+}
+catch {
     return @{
         status = 500
-        body = "Failed to query GitLab: $_"
+        body   = "Failed to query GitLab: $_"
     }
 }
 
 # ----------------------------
-# RETURN RESULTS
+# SEND TO LOGIC APP
 # ----------------------------
-$result = [PSCustomObject]@{
-    OldStatus = $oldStatus
-    NewStatus = $newStatus
-    ContactEmails = $emails -join ', '
+$payload = [PSCustomObject]@{
+    OldStatus    = $oldStatus
+    NewStatus    = $newStatus
+    ContactEmail = $email
+    IssueIid     = $issueIid
+    ProjectPath  = $projectPath
 }
 
-return @{
-    status = 200
-    body = $result | ConvertTo-Json -Depth 5
+try {
+    Invoke-RestMethod -Uri $logicAppEndpoint -Method Post `
+        -ContentType "application/json" `
+        -Body ($payload | ConvertTo-Json -Depth 5)
+    
+    $logicAppStatus = "Success"
+    $result = [PSCustomObject]@{
+        OldStatus      = $oldStatus
+        NewStatus      = $newStatus
+        ContactEmail   = $email
+        LogicAppStatus = $logicAppStatus
+    }
+
+    return @{
+        status = 200
+        body   = $result | ConvertTo-Json -Depth 5
+    }
 }
+catch {
+    $logicAppStatus = "Failed: $_"
+    $result = [PSCustomObject]@{
+        OldStatus      = $oldStatus
+        NewStatus      = $newStatus
+        ContactEmail   = $email
+        LogicAppStatus = $logicAppStatus
+    }
+
+    return @{
+        status = 500
+        body   = $result | ConvertTo-Json -Depth 5
+    }
+}
+
