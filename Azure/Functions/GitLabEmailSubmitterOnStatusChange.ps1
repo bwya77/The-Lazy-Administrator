@@ -14,25 +14,25 @@ param($Request, $TriggerMetadata)
 # ----------------------------
 function Get-StatusLabel {
     param($labels)
-    begin {
-    }
-    process {
-        foreach ($label in $labels) {
-            if ($label.title -like 'Status::*') {
-                return $label.title -replace '^Status::', ''
-            }
+    
+    foreach ($label in $labels) {
+        if ($label.title -like 'Status::*') {
+            return $label.title -replace '^Status::', ''
         }
     }
-    end {
-        $null
-    }
+    return $null
 }
 
 # ----------------------------
 # PARSE WEBHOOK
 # ----------------------------
 try {
-    $body = $Request.Body | Get-Content -Raw | ConvertFrom-Json
+    $body = $Request.Body
+    
+    # If it's a string, parse it
+    if ($body -is [string]) {
+        $body = $body | ConvertFrom-Json
+    }
 }
 catch {
     return @{
@@ -66,6 +66,10 @@ if ($oldStatus -eq $newStatus) {
 $projectPath = $body.project.path_with_namespace
 $issueIid = $body.object_attributes.iid
 $title = $body.object_attributes.title
+$headers = @{
+        "Authorization" = "Bearer $gitlabAccessToken"
+        "Content-Type"  = "application/json"
+    }
 
 $query = @"
 {
@@ -84,13 +88,15 @@ $query = @"
 "@
 
 try {
-    $response = Invoke-RestMethod -Uri $gitlabApiUrl -Method Post -Headers @{ 
-        "Authorization" = "Bearer $gitlabAccessToken" 
-    } -Body (@{ query = $query } | ConvertTo-Json)
+    $response = (Invoke-RestMethod -Uri $gitlabApiUrl -Method Post -Headers $headers -Body (@{ query = $query } | ConvertTo-Json)).data.project.issue.customerRelationsContacts.nodes
 
-    $contact = $response.data.project.issue.customerRelationsContacts.nodes
-    $email = $contact.email
-    $firstname = $contact.firstname
+    If ($null -eq $response) {
+        throw
+    }
+    else {
+        $firstname = $response.firstName
+        $email     = $response.email
+    }
 }
 catch {
     return @{
@@ -146,4 +152,3 @@ catch {
         body   = $result | ConvertTo-Json -Depth 5
     }
 }
-
