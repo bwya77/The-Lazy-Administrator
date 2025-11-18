@@ -219,7 +219,7 @@ function Add-MergeRequestComment {
 
         $headers = @{
             'PRIVATE-TOKEN' = $Token
-            'Content-Type' = 'application/json'
+            'Content-Type'  = 'application/json'
         }
 
         try {
@@ -373,6 +373,17 @@ try {
         Write-Host "  - Fixes #123"
         Write-Host "  - Resolves #123"
         Write-Host "  - #123"
+        $commentLines = @()
+        $commentLines += "WARNING: No issue references found in MR title or description."
+        $commentLines += ''
+        $commentLines += "Please link an issue to this MR using formats like:"
+        $commentLines += "  - Closes #123"
+        $commentLines += "  - Fixes #123"
+        $commentLines += "  - Resolves #123"
+        $commentLines += "  - #123"
+        $comment = $commentLines -join "`n"
+
+        Add-MergeRequestComment -GitLabUrl $gitlabUrl -ProjectId $projectId -MrIid $mrIid -Token $token -Comment $comment
         exit 1
     }
 
@@ -412,8 +423,8 @@ try {
 
                 # Store issue info for comment
                 $issuesWithProblems += @{
-                    IssueIid = $issueIid
-                    IssueUrl = $issueData.web_url
+                    IssueIid       = $issueIid
+                    IssueUrl       = $issueData.web_url
                     UncheckedItems = $checkboxResult.Unchecked
                 }
             }
@@ -430,7 +441,7 @@ try {
             # Store error info for comment
             $issuesWithProblems += @{
                 IssueIid = $issueIid
-                Error = $_.Exception.Message
+                Error    = $_.Exception.Message
             }
         }
     }
