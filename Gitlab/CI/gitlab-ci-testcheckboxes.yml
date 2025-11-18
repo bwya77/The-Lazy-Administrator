@@ -1,0 +1,22 @@
+# GitLab CI/CD Pipeline Configuration
+# This pipeline enforces that all checkboxes in linked issues are checked before MR merge
+
+stages:
+  - validate
+
+# Job to check that all checkboxes in linked issues are checked
+check-issue-checkboxes:
+  stage: validate
+  image: mcr.microsoft.com/powershell:latest
+
+  # Only run on merge request pipelines
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+  script:
+    - pwsh -File .ci/Test-IssueCheckboxes.ps1
+
+  variables:
+    # The GITLAB_TOKEN variable must be set in CI/CD settings
+    # with a token that has api scope access
+    GITLAB_TOKEN: $GITLAB_TOKEN
