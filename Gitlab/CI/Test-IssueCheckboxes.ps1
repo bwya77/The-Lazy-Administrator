@@ -374,7 +374,7 @@ try {
         Write-Host "  - Resolves #123"
         Write-Host "  - #123"
         $commentLines = @()
-        $commentLines += "WARNING: No issue references found in MR title or description."
+        $commentLines += "## No issue references found in MR title or description."
         $commentLines += ''
         $commentLines += "Please link an issue to this MR using formats like:"
         $commentLines += "  - Closes #123"
